@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: "Stack raiz de la app de asistencia (iac-asistencia). Orquesta stacks\
   \ anidados: red, security groups, NACLs y servidores EC2. Desplegar con \"aws cloudformation\
   \ package\" + \"deploy\" (ver README.md).\n"
-Parameters:
+Parfffameters:
   ProjectName:
     Type: String
     Default: iac-asistencia
