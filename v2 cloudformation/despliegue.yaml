@@ -1,0 +1,3 @@
+template-file-path: v2 cloudformation/mainprincipal.yaml
+parameters: {}
+tags: {}
