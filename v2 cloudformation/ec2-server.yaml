@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Servidor EC2 reutilizable (se usa para Frontend y Backend)
+
+Parameters:
+  ProjectName:
+    Type: String
+  ServerRole:
+    Type: String
+    Description: Rol en minusculas usado en el nombre (ej. frontend, backend)
+  Tier:
+    Type: String
+    Description: Valor de la etiqueta Tier (ej. Frontend, Backend-Restricted)
+  ImageId:
+    Type: AWS::EC2::Image::Id
+  InstanceType:
+    Type: String
+  KeyName:
+    Type: String
+    Default: ""
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+
+Conditions:
+  HasKeyName: !Not [!Equals [!Ref KeyName, ""]]
+
+Resources:
+  Server:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref AWS::NoValue]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 8
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+
+          # 1. Configurar archivo Swap de 2 GB (previene OOM en instancias con 1 GB RAM)
+          if [ ! -f /swapfile ]; then
+            fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            sysctl vm.swappiness=10
+            echo 'vm.swappiness=10' >> /etc/sysctl.conf
+          fi
+
+          # 2. Actualizar repositorios e instalar paquetes base
+          apt-get update -y
+          apt-get install -y ca-certificates curl gnupg git ufw
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${ServerRole}-server"
+        - Key: Tier
+          Value: !Ref Tier
+        - Key: Project
+          Value: !Ref ProjectName
+
+Outputs:
+  InstanceId:
+    Value: !Ref Server
+  PrivateIp:
+    Value: !GetAtt Server.PrivateIp
+  PublicIp:
+    Value: !GetAtt Server.PublicIp

@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Network ACLs para las subredes de Frontend y Backend
+
+Parameters:
+  ProjectName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  FrontendSubnetId:
+    Type: AWS::EC2::Subnet::Id
+  BackendSubnetId:
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnetCidr:
+    Type: String
+  AdminSshIp:
+    Type: String
+    Default: ""
+
+Conditions:
+  HasAdminSshIp: !Not [!Equals [!Ref AdminSshIp, ""]]
+
+Resources:
+
+  # ---------------- Frontend ----------------
+  FrontendNacl:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-frontend-nacl"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  FrontendNaclHttpIn:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref FrontendNacl
+      RuleNumber: 100
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange: { From: 80, To: 80 }
+
+  FrontendNaclHttpsIn:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref FrontendNacl
+      RuleNumber: 110
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange: { From: 443, To: 443 }
+
+  FrontendNaclSshIn:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref FrontendNacl
+      RuleNumber: 120
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange: { From: 22, To: 22 }
+
+  FrontendNaclEphemeralIn:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref FrontendNacl
+      RuleNumber: 130
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange: { From: 1024, To: 65535 }
+
+  FrontendNaclEgressAll:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref FrontendNacl
+      RuleNumber: 100
+      Protocol: -1
+      RuleAction: allow
+      Egress: true
+      CidrBlock: 0.0.0.0/0
+
+  FrontendNaclAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref FrontendSubnetId
+      NetworkAclId: !Ref FrontendNacl
+
+  # ---------------- Backend ----------------
+  BackendNacl:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-backend-nacl"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  BackendNaclApiIn:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref BackendNacl
+      RuleNumber: 100
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref PublicSubnetCidr
+      PortRange: { From: 3000, To: 3000 }
+
+  BackendNaclSshBastionIn:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref BackendNacl
+      RuleNumber: 120
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref PublicSubnetCidr
+      PortRange: { From: 22, To: 22 }
+
+  BackendNaclAdminSshIn:
+    Type: AWS::EC2::NetworkAclEntry
+    Condition: HasAdminSshIp
+    Properties:
+      NetworkAclId: !Ref BackendNacl
+      RuleNumber: 125
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref AdminSshIp
+      PortRange: { From: 22, To: 22 }
+
+  BackendNaclEphemeralIn:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref BackendNacl
+      RuleNumber: 130
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange: { From: 1024, To: 65535 }
+
+  BackendNaclEgressAll:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref BackendNacl
+      RuleNumber: 100
+      Protocol: -1
+      RuleAction: allow
+      Egress: true
+      CidrBlock: 0.0.0.0/0
+
+  BackendNaclAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref BackendSubnetId
+      NetworkAclId: !Ref BackendNacl

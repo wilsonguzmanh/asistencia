@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Security Groups de Frontend y Backend
+
+Parameters:
+  ProjectName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  AdminSshIp:
+    Type: String
+    Default: ""
+
+Conditions:
+  HasAdminSshIp: !Not [!Equals [!Ref AdminSshIp, ""]]
+
+Resources:
+  # Las reglas de entrada van como recursos separados (SecurityGroupIngress)
+  # para evitar conflictos al mezclar reglas inline con reglas externas.
+
+  FrontendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-frontend-sg"
+      GroupDescription: Reglas de firewall para el Frontend (Web y SSH publico)
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: Salida general para paquetes y conexion con backend
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-frontend-sg"
+        - Key: Tier
+          Value: Frontend
+        - Key: Project
+          Value: !Ref ProjectName
+
+  FrontendHttpIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref FrontendSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+      Description: Acceso Web HTTP publico
+
+  FrontendHttpsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref FrontendSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: Acceso Web HTTPS publico
+
+  FrontendSshIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref FrontendSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: 0.0.0.0/0
+      Description: Acceso SSH para administracion
+
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-backend-sg"
+      GroupDescription: Reglas de firewall para el Backend (Acceso cerrado a Internet)
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: Salida a internet para descarga de paquetes y librerias
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-backend-sg"
+        - Key: Tier
+          Value: Backend-Restricted
+        - Key: Project
+          Value: !Ref ProjectName
+
+  BackendApiIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BackendSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      SourceSecurityGroupId: !Ref FrontendSecurityGroup
+      Description: Acceso API NestJS EXCLUSIVO desde el Frontend
+
+  BackendBastionSshIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BackendSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      SourceSecurityGroupId: !Ref FrontendSecurityGroup
+      Description: Acceso SSH de salto (Bastion) desde el Frontend
+
+  BackendAdminSshIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasAdminSshIp
+    Properties:
+      GroupId: !Ref BackendSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: !Ref AdminSshIp
+      Description: Acceso SSH de emergencia desde la IP fija del administrador
+
+Outputs:
+  FrontendSecurityGroupId:
+    Value: !Ref FrontendSecurityGroup
+  BackendSecurityGroupId:
+    Value: !Ref BackendSecurityGroup

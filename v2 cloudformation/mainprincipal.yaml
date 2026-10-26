@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Stack raiz de la app de asistencia (iac-asistencia). Orquesta stacks\
+  \ anidados: red, security groups, NACLs y servidores EC2. Desplegar con \"aws cloudformation\
+  \ package\" + \"deploy\" (ver README.md).\n"
+Parameters:
+  ProjectName:
+    Type: String
+    Default: iac-asistencia
+    Description: Prefijo para los nombres y etiquetas de los recursos
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: Bloque CIDR de la VPC
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: Bloque CIDR de la Subred Publica (Servidor Frontend)
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.0.2.0/24
+    Description: Bloque CIDR de la Subred Aislada (Servidor Backend)
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+    - t3.micro
+    - t2.micro
+    Description: Tipo de instancia EC2 (Free Tier)
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: 
+      /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+    Description: AMI de Ubuntu 22.04 LTS resuelta automaticamente por region 
+      (apta para Free Tier)
+  KeyName:
+    Type: String
+    Default: ''
+    Description: Nombre opcional del Key Pair de EC2 para SSH (dejar vacio si no
+      se usa)
+  AdminSshIp:
+    Type: String
+    Default: ''
+    Description: IP publica del administrador para SSH de emergencia directo al 
+      backend (CIDR, ej. 190.10.20.30/32). Vacio = solo acceso via Frontend 
+      (Bastion)
+Conditions:
+  HasKeyName:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: KeyName
+      - ''
+Resources:
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 
+        https://s3.us-east-1.amazonaws.com/cf-templates-erwaho8rt0nf-us-east-1/c3983fa7952c5c2431071754a4bd9527.template
+      Parameters:
+        ProjectName:
+          Ref: ProjectName
+        VpcCidr:
+          Ref: VpcCidr
+        PublicSubnetCidr:
+          Ref: PublicSubnetCidr
+        PrivateSubnetCidr:
+          Ref: PrivateSubnetCidr
+  SecurityGroupsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 
+        https://s3.us-east-1.amazonaws.com/cf-templates-erwaho8rt0nf-us-east-1/22eca5605c612942df333b34518240d8.template
+      Parameters:
+        ProjectName:
+          Ref: ProjectName
+        VpcId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.VpcId
+        AdminSshIp:
+          Ref: AdminSshIp
+  NaclsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 
+        https://s3.us-east-1.amazonaws.com/cf-templates-erwaho8rt0nf-us-east-1/2c29b07cb8fb93fc0fc1d54972cd7043.template
+      Parameters:
+        ProjectName:
+          Ref: ProjectName
+        VpcId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.VpcId
+        FrontendSubnetId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.FrontendSubnetId
+        BackendSubnetId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.BackendSubnetId
+        PublicSubnetCidr:
+          Ref: PublicSubnetCidr
+        AdminSshIp:
+          Ref: AdminSshIp
+  FrontendServerStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: 
+        https://s3.us-east-1.amazonaws.com/cf-templates-erwaho8rt0nf-us-east-1/0fb8cfb66761d20ba23966b7cd6e7f11.template
+      Parameters:
+        ProjectName:
+          Ref: ProjectName
+        ServerRole: frontend
+        Tier: Frontend
+        ImageId:
+          Ref: ImageId
+        InstanceType:
+          Ref: InstanceType
+        KeyName:
+          Ref: KeyName
+        SubnetId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.FrontendSubnetId
+        SecurityGroupId:
+          Fn::GetAtt:
+          - SecurityGroupsStack
+          - Outputs.FrontendSecurityGroupId
+  BackendServerStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: 
+        https://s3.us-east-1.amazonaws.com/cf-templates-erwaho8rt0nf-us-east-1/0fb8cfb66761d20ba23966b7cd6e7f11.template
+      Parameters:
+        ProjectName:
+          Ref: ProjectName
+        ServerRole: backend
+        Tier: Backend-Restricted
+        ImageId:
+          Ref: ImageId
+        InstanceType:
+          Ref: InstanceType
+        KeyName:
+          Ref: KeyName
+        SubnetId:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.BackendSubnetId
+        SecurityGroupId:
+          Fn::GetAtt:
+          - SecurityGroupsStack
+          - Outputs.BackendSecurityGroupId
+Outputs:
+  FrontendPublicIp:
+    Description: Direccion IP publica del Servidor Frontend (cambia al detener y
+      encender la instancia)
+    Value:
+      Fn::GetAtt:
+      - FrontendServerStack
+      - Outputs.PublicIp
+  FrontendPrivateIp:
+    Description: Direccion IP privada del Servidor Frontend dentro de la VPC
+    Value:
+      Fn::GetAtt:
+      - FrontendServerStack
+      - Outputs.PrivateIp
+  BackendPrivateIp:
+    Description: IP privada del Servidor Backend - usar esta IP en la 
+      configuracion de Nginx
+    Value:
+      Fn::GetAtt:
+      - BackendServerStack
+      - Outputs.PrivateIp
+  BackendPublicIp:
+    Description: IP publica de salida del Backend (el trafico entrante esta 
+      bloqueado por el Security Group)
+    Value:
+      Fn::GetAtt:
+      - BackendServerStack
+      - Outputs.PublicIp
+  FrontendWebUrl:
+    Description: URL publica para abrir el frontend en el navegador (revisar 
+      tras cada reinicio)
+    Value:
+      Fn::Sub: http://${FrontendServerStack.Outputs.PublicIp}
+  SshConnectFrontend:
+    Condition: HasKeyName
+    Description: Comando para conectar por SSH al servidor Frontend
+    Value:
+      Fn::Sub: ssh -i <tu-clave.pem> 
+        ubuntu@${FrontendServerStack.Outputs.PublicIp}
+  SshConnectBackendBastion:
+    Condition: HasKeyName
+    Description: Comando para conectar por SSH al Backend usando el Frontend 
+      como salto (Bastion)
+    Value:
+      Fn::Sub: ssh -i <tu-clave.pem> -J 
+        ubuntu@${FrontendServerStack.Outputs.PublicIp} 
+        ubuntu@${BackendServerStack.Outputs.PrivateIp}
